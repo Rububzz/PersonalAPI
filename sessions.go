@@ -139,3 +139,60 @@ func insertSession(ctx context.Context, db *sql.DB, id int64, req createSessionR
 	}
 	return sess, nil
 }
+
+func (a *app) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "invalid book id")
+		return
+	}
+	sessions, err := listSessions(r.Context(), a.db, id)
+	if err != nil {
+		if errors.Is(err, errBookNotFound) {
+			writeError(w, http.StatusNotFound, "book not found")
+			return
+		}
+		a.logger.Error("failed to list sessions", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func bookExists(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	var exists bool
+	err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM books WHERE book_id = ?)`, id).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check book exists: %w", err)
+	}
+	return exists, nil
+}
+
+func listSessions(ctx context.Context, db *sql.DB, bookID int64) ([]session, error) {
+	exists, err := bookExists(ctx, db, bookID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, errBookNotFound
+	}
+	sessions := make([]session, 0)
+	rows, err := db.QueryContext(ctx, `SELECT session_id, book_id, start_page, end_page, read_at FROM reading_sessions WHERE book_id = ? ORDER BY read_at, session_id`, bookID)
+	if err != nil {
+		return nil, fmt.Errorf("query sessions: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var s session
+		if err := rows.Scan(&s.SessionID, &s.BookID, &s.StartPage, &s.EndPage, &s.ReadAt); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		s.PagesRead = s.EndPage - s.StartPage
+		sessions = append(sessions, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sessions: %w", err)
+	}
+	return sessions, nil
+}

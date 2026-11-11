@@ -59,6 +59,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /books", a.handleListBooks)
 	mux.HandleFunc("GET /books/{id}", a.handleGetBook)
 	mux.HandleFunc("POST /books/{id}/sessions", a.handleCreateSession)
+	mux.HandleFunc("GET /books/{id}/sessions", a.handleListSessions)
+	mux.HandleFunc("GET /books/{id}/progress", a.handleGetBookProgress)
 	return mux
 }
 

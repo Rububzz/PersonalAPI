@@ -31,6 +31,17 @@ type book struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+type bookProgress struct {
+	BookID          int     `json:"book_id"`
+	Sessions        int     `json:"sessions"`
+	PagesRead       int     `json:"pages_read"`
+	CurrentPage     int     `json:"current_page"`
+	LastReadAt      *string `json:"last_read_at"`
+	Status          string  `json:"status"`
+	TotalPages      int     `json:"total_pages"`
+	PercentComplete float64 `json:"percent_complete"`
+}
+
 var errBookExists = errors.New("book already exists")
 var errBookNotFound = errors.New("book not found")
 
@@ -156,4 +167,47 @@ func getBook(ctx context.Context, db *sql.DB, id int64) (book, error) {
 		return book{}, err
 	}
 	return b, nil
+}
+
+func (a *app) handleGetBookProgress(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, http.StatusBadRequest, "invalid book id")
+		return
+	}
+	progress, err := getBookProgress(r.Context(), a.db, id)
+	if err != nil {
+		if errors.Is(err, errBookNotFound) {
+			writeError(w, http.StatusNotFound, "book not found")
+			return
+		}
+		a.logger.Error("failed to get book progress", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	writeJSON(w, http.StatusOK, progress)
+}
+
+func getBookProgress(ctx context.Context, db *sql.DB, id int64) (bookProgress, error) {
+	var bp bookProgress
+	var lastRead sql.NullString
+	b, err := getBook(ctx, db, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return bookProgress{}, errBookNotFound
+		}
+		return bookProgress{}, fmt.Errorf("get book: %w", err)
+	}
+	bp.BookID = b.BookID
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(end_page), 0), COALESCE(SUM(end_page - start_page), 0), 
+	MAX(read_at), COALESCE(MAX(end_page) * 100.0 / ?, 0)  
+	FROM reading_sessions WHERE book_id = ?`, b.TotalPages, b.BookID).Scan(&bp.Sessions, &bp.CurrentPage, &bp.PagesRead, &lastRead, &bp.PercentComplete); err != nil {
+		return bookProgress{}, fmt.Errorf("query book progress: %w", err)
+	}
+	if lastRead.Valid {
+		bp.LastReadAt = &lastRead.String
+	}
+	bp.Status = b.Status
+	bp.TotalPages = b.TotalPages
+	return bp, nil
 }
