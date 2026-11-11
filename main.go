@@ -36,17 +36,40 @@ func loadConfig() config {
 	}
 }
 
-func run(logger *slog.Logger) error {
-	mux := http.NewServeMux()
-	c := loadConfig()
-
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate&_pragma=busy_timeout(5000)", c.DBPath)
-
+func openDB(path string) (*sql.DB, error) {
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate&_pragma=busy_timeout(5000)", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return fmt.Errorf("open database: %w", err)
+		return nil, fmt.Errorf("open database: %w", err)
 	}
 
+	_, err = db.Exec(schema)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("create schema: %w", err)
+	}
+	return db, nil
+
+}
+
+func (a *app) routes() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", a.handleHealth)
+	mux.HandleFunc("POST /books", a.handleCreateBook)
+	mux.HandleFunc("GET /books", a.handleListBooks)
+	mux.HandleFunc("GET /books/{id}", a.handleGetBook)
+	mux.HandleFunc("POST /books/{id}/sessions", a.handleCreateSession)
+	return mux
+}
+
+func run(logger *slog.Logger) error {
+	c := loadConfig()
+
+	db, err := openDB(c.DBPath)
+	if err != nil {
+		return fmt.Errorf("openDB: %w", err)
+	}
+	defer db.Close()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -55,17 +78,7 @@ func run(logger *slog.Logger) error {
 		logger: logger,
 	}
 
-	defer db.Close()
-
-	_, err = db.Exec(schema)
-	if err != nil {
-		return fmt.Errorf("create schema: %w", err)
-	}
-	mux.HandleFunc("GET /health", a.handleHealth)
-	mux.HandleFunc("POST /books", a.handleCreateBook)
-	mux.HandleFunc("GET /books", a.handleListBooks)
-	mux.HandleFunc("GET /books/{id}", a.handleGetBook)
-	mux.HandleFunc("POST /books/{id}/sessions", a.handleCreateSession)
+	mux := a.routes()
 
 	addr := ":" + c.Port
 	logger.Info("listening on", "addr", addr)

@@ -64,10 +64,7 @@ func (a *app) handleCreateBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(problems) > 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error":  "validation failed",
-			"fields": problems,
-		})
+		writeValidationError(w, problems)
 		return
 	}
 	b, err := insertBook(r.Context(), a.db, req)

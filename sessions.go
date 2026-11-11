@@ -71,7 +71,7 @@ func (a *app) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ReadAt = readAt
 	if len(problems) > 0 {
-		writeJSON(w, http.StatusBadRequest, problems)
+		writeValidationError(w, problems)
 		return
 	}
 	sess, err := insertSession(r.Context(), a.db, id, req)
